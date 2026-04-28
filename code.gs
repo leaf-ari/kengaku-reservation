@@ -34,20 +34,44 @@ function doPost(e) {
 
     var data = JSON.parse(e.postData.contents);
 
-    // ----- 入力バリデーション -----
-    var required = ['studentName', 'schoolName', 'date', 'time', 'staffName'];
+    // ----- 受信データをログに記録（デバッグ用） -----
+    Logger.log('doPost 受信データ: ' + JSON.stringify({
+      studentName: data.studentName || '(空)',
+      schoolName:  data.schoolName  || '(空)',
+      date:        data.date        || '(空)',
+      time:        data.time        || '(空)',
+      staffName:   data.staffName   || '(空)',
+      memo:        data.memo        || '(空)',
+    }));
+
+    // ----- 入力バリデーション（電話・メールは不要） -----
+    var required = [
+      { key: 'studentName', label: '学生氏名' },
+      { key: 'schoolName',  label: '学校名' },
+      { key: 'date',        label: '希望日' },
+      { key: 'time',        label: '希望時間' },
+      { key: 'staffName',   label: '担当者名' },
+    ];
     for (var i = 0; i < required.length; i++) {
-      var key = required[i];
-      if (!data[key] || String(data[key]).trim() === '') {
-        return jsonResponse({ success: false, message: '必須項目が入力されていません。' });
+      var key   = required[i].key;
+      var label = required[i].label;
+      if (!data[key] || String(data[key]).trim() === '' || data[key] === 'null' || data[key] === null) {
+        Logger.log('バリデーションエラー: ' + label + ' が空です。値=' + JSON.stringify(data[key]));
+        return jsonResponse({
+          success: false,
+          message: label + 'が入力されていません。フォームを確認して再度お試しください。',
+        });
       }
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date)) {
-      return jsonResponse({ success: false, message: '日付の形式が正しくありません。' });
+      Logger.log('日付形式エラー: ' + data.date);
+      return jsonResponse({ success: false, message: '日付の形式が正しくありません（例: 2025-04-28）。' });
     }
-    if (!/^\d{2}:\d{2}$/.test(data.time)) {
-      return jsonResponse({ success: false, message: '時間の形式が正しくありません。' });
+    // 時間は "09:00" 形式だが "9:00" でも受け付けられるよう正規表現を緩める
+    if (!/^\d{1,2}:\d{2}$/.test(String(data.time).trim())) {
+      Logger.log('時間形式エラー: ' + data.time);
+      return jsonResponse({ success: false, message: '時間の形式が正しくありません（例: 09:00）。' });
     }
 
     var sheet = getOrCreateSheet();
@@ -241,27 +265,3 @@ function getOrCreateSheet() {
   return sheet;
 }
 
-// 新フォーマット（電話・メールなし）でシートを初期化
-function initSheet(sheet) {
-  var headers = ['受付日時', '学生氏名', '学校名', '希望日', '希望時間', '担当者名', 'メモ', 'ステータス'];
-  sheet.appendRow(headers);
-  sheet.setFrozenRows(1);
-
-  var hr = sheet.getRange(1, 1, 1, headers.length);
-  hr.setBackground('#2e7d32');
-  hr.setFontColor('#ffffff');
-  hr.setFontWeight('bold');
-  hr.setHorizontalAlignment('center');
-
-  var widths = [160, 110, 160, 100, 90, 110, 220, 90];
-  for (var i = 0; i < widths.length; i++) {
-    sheet.setColumnWidth(i + 1, widths[i]);
-  }
-
-  // 希望日(D), 希望時間(E) をテキスト形式に（自動変換防止）
-  setTextFormat(sheet, headers);
-}
-
-// 希望日・希望時間列をテキスト形式に設定
-function setTextFormat(sheet, headers) {
-  var headersArr = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
