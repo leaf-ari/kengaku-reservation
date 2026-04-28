@@ -263,6 +263,7 @@ function showCalendarView() {
 function validateForm() {
   let valid = true;
 
+  // ---- テキスト入力フィールドのチェック ----
   const fields = [
     { id: 'studentName', label: '学生氏名' },
     { id: 'schoolName',  label: '学校名' },
@@ -272,15 +273,25 @@ function validateForm() {
   fields.forEach(({ id, label }) => {
     const el  = document.getElementById(id);
     const err = document.getElementById(id + 'Error');
-    if (!el.value.trim()) {
-      err.textContent = `${label}を入力してください`;
-      el.classList.add('is-error');
+    if (!el || !el.value.trim()) {
+      if (err) err.textContent = `${label}を入力してください`;
+      if (el)  el.classList.add('is-error');
       valid = false;
     } else {
-      err.textContent = '';
+      if (err) err.textContent = '';
       el.classList.remove('is-error');
     }
   });
+
+  // ---- 日付・時間（カレンダーから自動セット）のチェック ----
+  if (!selectedDate) {
+    console.warn('[見学予約] selectedDate が未セットです');
+    valid = false;
+  }
+  if (!selectedTime) {
+    console.warn('[見学予約] selectedTime が未セットです');
+    valid = false;
+  }
 
   return valid;
 }
@@ -302,15 +313,21 @@ async function handleSubmit(e) {
     return;
   }
 
-  // 電話・メールなしのペイロード
+  // 電話・メールなし — hidden input からも読んで万全を期す
+  const dateVal = selectedDate  || document.getElementById('date').value         || null;
+  const timeVal = selectedTime  || document.getElementById('selectedTime').value || null;
+
   const payload = {
     studentName: document.getElementById('studentName').value.trim(),
     schoolName:  document.getElementById('schoolName').value.trim(),
-    date:        selectedDate,
-    time:        selectedTime,
+    date:        dateVal,
+    time:        timeVal,
     staffName:   document.getElementById('staffName').value.trim(),
     memo:        document.getElementById('memo').value.trim(),
   };
+
+  // ★送信内容をコンソールに出力（デバッグ用）
+  console.log('[見学予約] 送信ペイロード:', JSON.stringify(payload));
 
   setLoading(true);
 
@@ -322,8 +339,10 @@ async function handleSubmit(e) {
     });
     const json = await res.json();
 
+    // ★GASからの応答をコンソールに出力（デバッグ用）
+    console.log('[見学予約] GAS応答:', JSON.stringify(json));
+
     if (json.success) {
-      // キャッシュをクリアして最新の空き状況を取得
       const mondayStr = toISODate(getWeekMonday());
       delete availabilityCache[mondayStr];
       openSuccessModal(payload);
