@@ -7,45 +7,27 @@ const SHEET_NAME   = '予約一覧';
 const MAX_PER_SLOT = 2;
 const TIMEZONE     = 'Asia/Tokyo';
 
-// スプレッドシートの列インデックス（0始まり）
-const COL = {
-  TIMESTAMP:    0,
-  STUDENT_NAME: 1,
-  SCHOOL_NAME:  2,
-  PHONE:        3,
-  EMAIL:        4,
-  DATE:         5,
-  TIME:         6,
-  STAFF_NAME:   7,
-  MEMO:         8,
-  STATUS:       9,
-};
-
 // ============================================================
 // GET ハンドラ
 // ============================================================
 function doGet(e) {
-  const p = e.parameter;
+  var p = e.parameter;
 
-  // 1週間の空き枠取得
   if (p.action === 'getWeekAvailability' && p.startDate) {
     return handleGetWeekAvailability(p.startDate);
   }
-
-  // 1日の空き枠取得（後方互換）
   if (p.action === 'getAvailability' && p.date) {
     return handleGetAvailability(p.date);
   }
 
-  // 動作確認用
-  return jsonResponse({ success: true, message: 'GAS is running. date=' + new Date().toISOString() });
+  return jsonResponse({ success: true, message: 'GAS is running. ' + new Date().toISOString() });
 }
 
 // ============================================================
 // POST ハンドラ（予約登録）
 // ============================================================
 function doPost(e) {
-  const lock = LockService.getScriptLock();
+  var lock = LockService.getScriptLock();
 
   try {
     lock.waitLock(15000);
@@ -53,7 +35,7 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
 
     // ----- 入力バリデーション -----
-    var required = ['studentName', 'schoolName', 'phone', 'email', 'date', 'time', 'staffName'];
+    var required = ['studentName', 'schoolName', 'date', 'time', 'staffName'];
     for (var i = 0; i < required.length; i++) {
       var key = required[i];
       if (!data[key] || String(data[key]).trim() === '') {
@@ -64,7 +46,6 @@ function doPost(e) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date)) {
       return jsonResponse({ success: false, message: '日付の形式が正しくありません。' });
     }
-
     if (!/^\d{2}:\d{2}$/.test(data.time)) {
       return jsonResponse({ success: false, message: '時間の形式が正しくありません。' });
     }
@@ -81,23 +62,7 @@ function doPost(e) {
     }
 
     // ----- スプレッドシートに書き込み -----
-    var now       = new Date();
-    var timestamp = Utilities.formatDate(now, TIMEZONE, 'yyyy/MM/dd HH:mm:ss');
-
-    sheet.appendRow([
-      timestamp,
-      data.studentName.trim(),
-      data.schoolName.trim(),
-      data.phone.trim(),
-      data.email.trim(),
-      data.date,
-      data.time,
-      data.staffName.trim(),
-      (data.memo || '').trim(),
-      '予約済み',
-    ]);
-
-    formatLastRow(sheet);
+    appendReservation(sheet, data);
 
     return jsonResponse({
       success: true,
@@ -119,8 +84,7 @@ function doPost(e) {
 
 // ============================================================
 // 1週間の空き枠取得
-// 引数 startDate: 'YYYY-MM-DD'（月曜日）
-// 戻り値: { success: true, availability: { 'YYYY-MM-DD': { 'HH:mm': count } } }
+// startDate: 'YYYY-MM-DD'（月曜日）
 // ============================================================
 function handleGetWeekAvailability(startDate) {
   try {
@@ -128,12 +92,8 @@ function handleGetWeekAvailability(startDate) {
     var slots = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
     var result = {};
 
-    // startDate を年月日に分解して Date を生成（タイムゾーン問題を回避）
-    var parts = startDate.split('-');
-    var year  = parseInt(parts[0], 10);
-    var month = parseInt(parts[1], 10) - 1; // 0始まり
-    var day   = parseInt(parts[2], 10);
-    var baseDate = new Date(year, month, day);
+    var parts    = startDate.split('-');
+    var baseDate = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
 
     for (var i = 0; i < 7; i++) {
       var d = new Date(baseDate);
@@ -174,22 +134,50 @@ function handleGetAvailability(date) {
 }
 
 // ============================================================
-// 指定日・時間の予約件数をカウント
+// 予約件数カウント
+//
+// ★修正ポイント★
+//  - ヘッダー行から列名で列番号を動的取得（固定インデックス廃止）
+//  - ステータス = '予約済み' の行だけカウント
+//  - 日付・時間を正規化してから比較（"9:00"/"09:00" 混在に対応）
 // ============================================================
 function countReservations(sheet, targetDate, targetTime) {
-  var data  = sheet.getDataRange().getValues();
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 0;
+
+  // ヘッダー行から列インデックスを動的に取得
+  var headers   = data[0];
+  var dateCol   = findColumnIndex(headers, '希望日');
+  var timeCol   = findColumnIndex(headers, '希望時間');
+  var statusCol = findColumnIndex(headers, 'ステータス');
+
+  if (dateCol === -1 || timeCol === -1) {
+    Logger.log('countReservations: 希望日 または 希望時間 の列が見つかりません');
+    return 0;
+  }
+
+  // 比較対象も正規化しておく
+  var normTarget  = normalizeDate(targetDate);
+  var normTgtTime = normalizeTime(targetTime);
+
   var count = 0;
-
   for (var i = 1; i < data.length; i++) {
-    var status = String(data[i][COL.STATUS]).trim();
+    var row = data[i];
 
-    // キャンセル済みはカウントしない
-    if (status === 'キャンセル') continue;
+    // 空行スキップ
+    if (row[dateCol] === '' || row[dateCol] === null || row[dateCol] === undefined) continue;
 
-    var rowDate = normalizeDate(data[i][COL.DATE]);
-    var rowTime = normalizeTime(data[i][COL.TIME]);
+    // ★ステータスが「予約済み」の行だけカウント
+    if (statusCol !== -1) {
+      var status = String(row[statusCol]).trim();
+      if (status !== '予約済み') continue;
+    }
+    // statusCol === -1 のとき（ステータス列なし）は全件カウント（旧データ互換）
 
-    if (rowDate === targetDate && rowTime === targetTime) {
+    var rowDate = normalizeDate(row[dateCol]);
+    var rowTime = normalizeTime(row[timeCol]);
+
+    if (rowDate === normTarget && rowTime === normTgtTime) {
       count++;
     }
   }
@@ -198,70 +186,82 @@ function countReservations(sheet, targetDate, targetTime) {
 }
 
 // ============================================================
-// シート取得 or 作成（初回のみヘッダーを自動生成）
+// ヘッダー名から列インデックスを取得（-1 = 見つからない）
+// ============================================================
+function findColumnIndex(headers, name) {
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim() === name) return i;
+  }
+  return -1;
+}
+
+// ============================================================
+// スプレッドシートへ予約を書き込む
+// ★ヘッダーを読んで列名で位置を決めるため、旧フォーマット（電話・メール列あり）でも動作
+// ============================================================
+function appendReservation(sheet, data) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var now       = new Date();
+  var timestamp = Utilities.formatDate(now, TIMEZONE, 'yyyy/MM/dd HH:mm:ss');
+
+  // 列名と書き込む値の対応表
+  var valueMap = {
+    '受付日時':       timestamp,
+    '学生氏名':       data.studentName.trim(),
+    '学校名':         data.schoolName.trim(),
+    '電話番号':       '',   // 旧フォーマット対応（空欄）
+    'メールアドレス':  '',   // 旧フォーマット対応（空欄）
+    '希望日':         data.date,
+    '希望時間':       data.time,
+    '担当者名':       data.staffName.trim(),
+    'メモ':           (data.memo || '').trim(),
+    'ステータス':     '予約済み',
+  };
+
+  var row = [];
+  for (var i = 0; i < headers.length; i++) {
+    var h = String(headers[i]).trim();
+    row.push(valueMap.hasOwnProperty(h) ? valueMap[h] : '');
+  }
+
+  sheet.appendRow(row);
+  formatLastRow(sheet);
+}
+
+// ============================================================
+// シート取得 or 作成
 // ============================================================
 function getOrCreateSheet() {
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
-
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
     initSheet(sheet);
   }
-
   return sheet;
 }
 
+// 新フォーマット（電話・メールなし）でシートを初期化
 function initSheet(sheet) {
-  var headers = [
-    '受付日時', '学生氏名', '学校名', '電話番号', 'メールアドレス',
-    '希望日', '希望時間', '担当者名', 'メモ', 'ステータス',
-  ];
-
+  var headers = ['受付日時', '学生氏名', '学校名', '希望日', '希望時間', '担当者名', 'メモ', 'ステータス'];
   sheet.appendRow(headers);
   sheet.setFrozenRows(1);
 
-  // ヘッダー書式
   var hr = sheet.getRange(1, 1, 1, headers.length);
   hr.setBackground('#2e7d32');
   hr.setFontColor('#ffffff');
   hr.setFontWeight('bold');
   hr.setHorizontalAlignment('center');
 
-  // 列幅
-  var widths = [160, 110, 160, 130, 190, 100, 90, 110, 220, 90];
+  var widths = [160, 110, 160, 100, 90, 110, 220, 90];
   for (var i = 0; i < widths.length; i++) {
     sheet.setColumnWidth(i + 1, widths[i]);
   }
 
-  // 希望日・希望時間列をテキスト形式に設定（自動変換を防ぐ）
-  sheet.getRange('F:F').setNumberFormat('@');
-  sheet.getRange('G:G').setNumberFormat('@');
+  // 希望日(D), 希望時間(E) をテキスト形式に（自動変換防止）
+  setTextFormat(sheet, headers);
 }
 
-function formatLastRow(sheet) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var range = sheet.getRange(lastRow, 1, 1, 10);
-  range.setVerticalAlignment('middle');
-  if (lastRow % 2 === 0) {
-    range.setBackground('#f9fbe7');
-  }
-}
-
-// ============================================================
-// 型正規化（Googleスプレッドシートはセル値を自動変換することがある）
-// ============================================================
-function normalizeDate(value) {
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, TIMEZONE, 'yyyy-MM-dd');
-  }
-  return String(value).trim();
-}
-
-function normalizeTime(value) {
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, TIMEZONE, 'HH:mm');
-  }
-  // 数値の場合（例: 0.375 = 9/24時間 = 9:00）
-  if (typeof value === 'number') {
+// 希望日・希望時間列をテキスト形式に設定
+function setTextFormat(sheet, headers) {
+  var headersArr = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
