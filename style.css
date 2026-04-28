@@ -175,6 +175,20 @@ body {
   font-weight: 700;
 }
 
+.legend-tri {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: #fff8e1;
+  border: 1.5px solid #ffb74d;
+  border-radius: 6px;
+  color: #e65100;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
 .legend-x {
   display: inline-flex;
   align-items: center;
@@ -377,6 +391,30 @@ body {
 .slot-o:hover,
 .slot-o:focus { background: #c8e6c9; border-color: #4caf50; outline: none; }
 .slot-o:active { background: #a5d6a7; transform: scale(0.95); }
+
+/* △ ボタン（残り1枠） */
+.slot-tri {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e65100;
+  background: #fff8e1;
+  border: 1.5px solid #ffb74d;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: all var(--t);
+  user-select: none;
+}
+
+.slot-tri:hover,
+.slot-tri:focus { background: #ffecb3; border-color: #ffa726; outline: none; }
+.slot-tri:active { background: #ffe082; transform: scale(0.95); }
 
 /* × （満席・過去） */
 .slot-x {
@@ -721,5 +759,5 @@ body {
   .form-footer { padding: 18px 16px 0; }
   .th-date { width: 72px; min-width: 72px; }
   .cell-slot { width: 72px; min-width: 72px; }
-  .slot-o, .slot-x { width: 56px; height: 52px; }
+  .slot-o, .slot-tri, .slot-x { width: 56px; height: 52px; }
 }
