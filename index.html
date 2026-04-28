@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2e7d32">
+  <title>見学予約 | 株式会社リーフ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="page-wrapper">
+
+    <!-- ヘッダー -->
+    <header class="header">
+      <div class="header-inner">
+        <div class="header-logo">🌿</div>
+        <div class="header-text">
+          <h1 class="header-title">見学予約</h1>
+          <p class="header-sub">株式会社リーフ</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="main">
+      <form id="reservationForm" novalidate>
+
+        <!-- 学生情報セクション -->
+        <section class="form-card">
+          <h2 class="card-title">
+            <span class="card-icon">👤</span>
+            学生情報
+          </h2>
+
+          <div class="form-group">
+            <label class="form-label" for="studentName">
+              学生氏名 <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input"
+              type="text"
+              id="studentName"
+              name="studentName"
+              placeholder="例：田中 太郎"
+              autocomplete="off"
+            >
+            <p class="error-msg" id="studentNameError" role="alert"></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="schoolName">
+              学校名 <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input"
+              type="text"
+              id="schoolName"
+              name="schoolName"
+              placeholder="例：○○大学 ○○学部"
+              autocomplete="off"
+            >
+            <p class="error-msg" id="schoolNameError" role="alert"></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="phone">
+              電話番号 <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input"
+              type="tel"
+              id="phone"
+              name="phone"
+              placeholder="例：090-1234-5678"
+              autocomplete="tel"
+            >
+            <p class="error-msg" id="phoneError" role="alert"></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="email">
+              メールアドレス <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input"
+              type="email"
+              id="email"
+              name="email"
+              placeholder="例：taro@example.com"
+              autocomplete="email"
+            >
+            <p class="error-msg" id="emailError" role="alert"></p>
+          </div>
+        </section>
+
+        <!-- 見学日時セクション -->
+        <section class="form-card">
+          <h2 class="card-title">
+            <span class="card-icon">📅</span>
+            見学日時
+          </h2>
+
+          <div class="form-group">
+            <label class="form-label" for="date">
+              希望日 <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input form-input--date"
+              type="date"
+              id="date"
+              name="date"
+            >
+            <p class="error-msg" id="dateError" role="alert"></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">
+              希望時間 <span class="required-badge">必須</span>
+            </label>
+            <div class="time-grid" id="timeGrid">
+              <p class="time-hint">先に希望日を選択してください</p>
+            </div>
+            <input type="hidden" id="selectedTime" name="time">
+            <p class="error-msg" id="timeError" role="alert"></p>
+          </div>
+        </section>
+
+        <!-- 担当者情報セクション -->
+        <section class="form-card">
+          <h2 class="card-title">
+            <span class="card-icon">📋</span>
+            担当者情報
+          </h2>
+
+          <div class="form-group">
+            <label class="form-label" for="staffName">
+              担当者名 <span class="required-badge">必須</span>
+            </label>
+            <input
+              class="form-input"
+              type="text"
+              id="staffName"
+              name="staffName"
+              placeholder="例：山田 花子"
+              autocomplete="off"
+            >
+            <p class="error-msg" id="staffNameError" role="alert"></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="memo">
+              メモ <span class="optional-badge">任意</span>
+            </label>
+            <textarea
+              class="form-textarea"
+              id="memo"
+              name="memo"
+              placeholder="特記事項があれば入力してください（志望職種、質問事項など）"
+              rows="3"
+            ></textarea>
+          </div>
+        </section>
+
+        <!-- 送信ボタン -->
+        <div class="form-footer">
+          <button type="submit" class="btn-submit" id="submitBtn">
+            <span class="btn-submit__icon">✅</span>
+            予約を確定する
+          </button>
+        </div>
+
+      </form>
+    </main>
+
+  </div><!-- /page-wrapper -->
+
+  <!-- 予約完了モーダル -->
+  <div class="modal" id="successModal" role="dialog" aria-modal="true" aria-labelledby="successTitle">
+    <div class="modal-overlay" onclick="closeSuccessModal()"></div>
+    <div class="modal-box modal-box--success">
+      <div class="modal-icon modal-icon--success">✓</div>
+      <h2 class="modal-title" id="successTitle">予約が完了しました</h2>
+      <div class="modal-details" id="successDetails"></div>
+      <button class="btn-modal btn-modal--success" onclick="closeSuccessModal()">
+        新しい予約を入力する
+      </button>
+    </div>
+  </div>
+
+  <!-- エラーモーダル -->
+  <div class="modal" id="errorModal" role="dialog" aria-modal="true" aria-labelledby="errorTitle">
+    <div class="modal-overlay" onclick="closeErrorModal()"></div>
+    <div class="modal-box modal-box--error">
+      <div class="modal-icon modal-icon--error">!</div>
+      <h2 class="modal-title" id="errorTitle">予約できませんでした</h2>
+      <p class="modal-message" id="errorMessage"></p>
+      <button class="btn-modal btn-modal--error" onclick="closeErrorModal()">
+        戻る
+      </button>
+    </div>
+  </div>
+
+  <!-- ローディングオーバーレイ -->
+  <div class="loading-overlay" id="loadingOverlay" aria-hidden="true">
+    <div class="loading-content">
+      <div class="spinner"></div>
+      <p class="loading-text">送信中...</p>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
