@@ -22,7 +22,7 @@ const DAY_NAMES    = ['日', '月', '火', '水', '木', '金', '土'];
 
 // アプリ状態
 let weekOffset = 0;
-const availabilityCache = {};  // { 'YYYY-MM-DD': { 'YYYY-MM-DD': { 'HH:mm': count } } }
+const availabilityCache = {};
 let selectedDate = null;
 let selectedTime = null;
 
@@ -40,11 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('backBtn').addEventListener('click', showCalendarView);
   document.getElementById('reservationForm').addEventListener('submit', handleSubmit);
 
-  // 入力時にリアルタイムでエラーをクリア
   document.querySelectorAll('.form-input, .form-textarea').forEach(el => {
     el.addEventListener('input', () => {
       const errEl = document.getElementById(el.id + 'Error');
-      if (errEl) { errEl.textContent = ''; }
+      if (errEl) errEl.textContent = '';
       el.classList.remove('is-error');
     });
   });
@@ -53,19 +52,16 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 // 週ナビゲーション
 // ============================================================
-
-// 現在の weekOffset から月曜日の Date を返す
 function getWeekMonday() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const dow  = today.getDay();           // 0=Sun … 6=Sat
-  const diff = dow === 0 ? -6 : 1 - dow; // 月曜にずらす
+  const dow  = today.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
   const mon  = new Date(today);
   mon.setDate(today.getDate() + diff + weekOffset * 7);
   return mon;
 }
 
-// 月曜から7日分の Date 配列を返す
 function getWeekDates() {
   const mon = getWeekMonday();
   return Array.from({ length: 7 }, (_, i) => {
@@ -76,12 +72,11 @@ function getWeekDates() {
 }
 
 function updateWeekNavUI() {
-  const dates  = getWeekDates();
-  const start  = dates[0];
-  const end    = dates[6];
-  const label  = `${start.getMonth() + 1}月${start.getDate()}日 〜 ${end.getMonth() + 1}月${end.getDate()}日`;
-
-  document.getElementById('weekLabel').textContent = label;
+  const dates = getWeekDates();
+  const start = dates[0];
+  const end   = dates[6];
+  document.getElementById('weekLabel').textContent =
+    `${start.getMonth()+1}月${start.getDate()}日 〜 ${end.getMonth()+1}月${end.getDate()}日`;
   document.getElementById('prevWeek').disabled = weekOffset <= -2;
   document.getElementById('nextWeek').disabled = weekOffset >= 12;
   document.getElementById('todayBtn').style.display = weekOffset !== 0 ? 'inline-block' : 'none';
@@ -99,7 +94,6 @@ async function loadWeekData() {
   const monday    = getWeekMonday();
   const mondayStr = toISODate(monday);
 
-  // キャッシュがあればそのまま描画
   if (availabilityCache[mondayStr]) {
     renderCalendar(getWeekDates(), availabilityCache[mondayStr]);
     return;
@@ -107,20 +101,17 @@ async function loadWeekData() {
 
   setCalendarState('loading');
 
-  // GAS URL が未設定の場合はデモ（空データ）表示
   if (!isValidGASUrl(GAS_URL)) {
-    console.warn('[見学予約] GAS URLが正しく設定されていません。デモ表示をします。');
+    console.warn('[見学予約] GAS URLが設定されていません。デモ表示をします。');
     availabilityCache[mondayStr] = {};
     renderCalendar(getWeekDates(), {});
     return;
   }
 
   try {
-    const url = `${GAS_URL}?action=getWeekAvailability&startDate=${encodeURIComponent(mondayStr)}`;
+    const url  = `${GAS_URL}?action=getWeekAvailability&startDate=${encodeURIComponent(mondayStr)}`;
     const res  = await fetch(url, { cache: 'no-store' });
-
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
     const json = await res.json();
 
     if (json.success) {
@@ -136,77 +127,60 @@ async function loadWeekData() {
   }
 }
 
-// カレンダー表示状態を切り替える
 function setCalendarState(state) {
-  document.getElementById('calendarLoading').style.display  = state === 'loading' ? 'flex'  : 'none';
-  document.getElementById('calendarError').style.display    = state === 'error'   ? 'flex'  : 'none';
-  document.getElementById('tableScrollArea').style.display  = state === 'table'   ? 'block' : 'none';
+  document.getElementById('calendarLoading').style.display = state === 'loading' ? 'flex'  : 'none';
+  document.getElementById('calendarError').style.display   = state === 'error'   ? 'flex'  : 'none';
+  document.getElementById('tableScrollArea').style.display = state === 'table'   ? 'block' : 'none';
 }
 
 // ============================================================
 // カレンダー描画
+// 〇=0件  △=1件  ×=2件以上 or 過去
 // ============================================================
 function renderCalendar(weekDates, availability) {
-  const table  = document.getElementById('calendarTable');
-  const today  = new Date();
+  const table = document.getElementById('calendarTable');
+  const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // テーブルをリセット
   table.innerHTML = '';
 
   // ===== ヘッダー行 =====
   const thead = table.createTHead();
   const hRow  = thead.insertRow();
 
-  // 時間列ヘッダー（sticky left）
   const thTime = document.createElement('th');
   thTime.className = 'th-time';
   thTime.textContent = '時間';
   hRow.appendChild(thTime);
 
-  // 日付列ヘッダー
   weekDates.forEach(date => {
     const th   = document.createElement('th');
     const dow  = date.getDay();
     const isToday = date.getTime() === today.getTime();
-
     let cls = 'th-date';
     if (isToday) cls += ' th-date--today';
     if (dow === 6) cls += ' th-date--sat';
     if (dow === 0) cls += ' th-date--sun';
     th.className = cls;
-
-    const daySpan  = document.createElement('span');
-    daySpan.className = 'th-day';
-    daySpan.textContent = DAY_NAMES[dow];
-
-    const dateSpan = document.createElement('span');
-    dateSpan.className = 'th-date-num';
-    dateSpan.textContent = `${date.getMonth() + 1}/${date.getDate()}`;
-
-    th.appendChild(daySpan);
-    th.appendChild(dateSpan);
+    th.innerHTML = `<span class="th-day">${DAY_NAMES[dow]}</span><span class="th-date-num">${date.getMonth()+1}/${date.getDate()}</span>`;
     hRow.appendChild(th);
   });
 
-  // ===== ボディ行（時間スロット） =====
+  // ===== ボディ行 =====
   const tbody = table.createTBody();
 
   TIME_SLOTS.forEach(({ time }) => {
     const tr = tbody.insertRow();
 
-    // 時間セル（sticky left）
     const tdTime = tr.insertCell();
     tdTime.className = 'cell-time';
     tdTime.textContent = time;
 
-    // 各日付のスロットセル
     weekDates.forEach(date => {
       const dateStr = toISODate(date);
       const td      = tr.insertCell();
       const dow     = date.getDay();
 
-      // 列の色クラス
       let cellCls = 'cell-slot';
       if (date.getTime() === today.getTime()) cellCls += ' cell-slot--today';
       else if (dow === 6) cellCls += ' cell-slot--sat';
@@ -218,18 +192,29 @@ function renderCalendar(weekDates, availability) {
       const isFull  = count >= MAX_PER_SLOT;
 
       if (isPast || isFull) {
-        // ×
-        const span   = document.createElement('span');
+        // ×（満席・過去）
+        const span = document.createElement('span');
         span.className = 'slot-x';
         span.textContent = '×';
         td.appendChild(span);
-      } else {
-        // 〇ボタン
+
+      } else if (count === 1) {
+        // △（残り1枠）
         const btn = document.createElement('button');
-        btn.type  = 'button';
+        btn.type      = 'button';
+        btn.className = 'slot-tri';
+        btn.textContent = '△';
+        btn.setAttribute('aria-label', `${formatJpDate(dateStr)} ${time} 残り1枠 予約する`);
+        btn.addEventListener('click', () => openFormView(dateStr, time));
+        td.appendChild(btn);
+
+      } else {
+        // 〇（空きあり）
+        const btn = document.createElement('button');
+        btn.type      = 'button';
         btn.className = 'slot-o';
         btn.textContent = '〇';
-        btn.setAttribute('aria-label', `${formatJpDate(dateStr)} ${time} を予約`);
+        btn.setAttribute('aria-label', `${formatJpDate(dateStr)} ${time} 予約する`);
         btn.addEventListener('click', () => openFormView(dateStr, time));
         td.appendChild(btn);
       }
@@ -239,7 +224,6 @@ function renderCalendar(weekDates, availability) {
   setCalendarState('table');
 }
 
-// availability オブジェクトから件数を安全に取得
 function getCount(availability, dateStr, time) {
   if (!availability || !availability[dateStr]) return 0;
   const v = availability[dateStr][time];
@@ -274,7 +258,7 @@ function showCalendarView() {
 }
 
 // ============================================================
-// フォームバリデーション
+// フォームバリデーション（電話・メールなし）
 // ============================================================
 function validateForm() {
   let valid = true;
@@ -282,8 +266,6 @@ function validateForm() {
   const fields = [
     { id: 'studentName', label: '学生氏名' },
     { id: 'schoolName',  label: '学校名' },
-    { id: 'phone',       label: '電話番号' },
-    { id: 'email',       label: 'メールアドレス' },
     { id: 'staffName',   label: '担当者名' },
   ];
 
@@ -299,15 +281,6 @@ function validateForm() {
       el.classList.remove('is-error');
     }
   });
-
-  // メール形式チェック
-  const emailEl  = document.getElementById('email');
-  const emailErr = document.getElementById('emailError');
-  if (emailEl.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
-    emailErr.textContent = '正しいメールアドレスを入力してください';
-    emailEl.classList.add('is-error');
-    valid = false;
-  }
 
   return valid;
 }
@@ -325,15 +298,14 @@ async function handleSubmit(e) {
   }
 
   if (!isValidGASUrl(GAS_URL)) {
-    openErrorModal('GAS URLが設定されていません。\nREADME.mdの手順に従って\nscript.js の GAS_URL を設定してください。');
+    openErrorModal('GAS URLが設定されていません。\nREADME.mdの手順に従ってscript.jsのGAS_URLを設定してください。');
     return;
   }
 
+  // 電話・メールなしのペイロード
   const payload = {
     studentName: document.getElementById('studentName').value.trim(),
     schoolName:  document.getElementById('schoolName').value.trim(),
-    phone:       document.getElementById('phone').value.trim(),
-    email:       document.getElementById('email').value.trim(),
     date:        selectedDate,
     time:        selectedTime,
     staffName:   document.getElementById('staffName').value.trim(),
@@ -348,14 +320,12 @@ async function handleSubmit(e) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body:    JSON.stringify(payload),
     });
-
     const json = await res.json();
 
     if (json.success) {
-      // キャッシュをクリアして最新データを取得できるようにする
+      // キャッシュをクリアして最新の空き状況を取得
       const mondayStr = toISODate(getWeekMonday());
       delete availabilityCache[mondayStr];
-
       openSuccessModal(payload);
     } else {
       openErrorModal(json.message || '予約の登録に失敗しました。\nしばらく待ってから再度お試しください。');
@@ -384,7 +354,7 @@ function openSuccessModal(data) {
 function closeSuccessModal() {
   document.getElementById('successModal').classList.remove('is-open');
   showCalendarView();
-  loadWeekData(); // 予約後に最新の空き状況を反映
+  loadWeekData();
 }
 
 function openErrorModal(message) {
@@ -396,29 +366,24 @@ function closeErrorModal() {
   document.getElementById('errorModal').classList.remove('is-open');
 }
 
-// HTMLのonclick属性から呼び出せるようにグローバルに公開
 window.closeSuccessModal = closeSuccessModal;
 window.closeErrorModal   = closeErrorModal;
 
 // ============================================================
 // ユーティリティ
 // ============================================================
-
-// スロットが過去かどうか判定（開始時刻が現在より前なら past）
 function isPastSlot(dateObj, timeStr) {
-  const now = new Date();
+  const now  = new Date();
   const [h]  = timeStr.split(':').map(Number);
   const slot = new Date(dateObj);
   slot.setHours(h, 0, 0, 0);
   return slot < now;
 }
 
-// GAS URL の簡易バリデーション
 function isValidGASUrl(url) {
   return url && url !== 'YOUR_GAS_URL_HERE' && url.startsWith('https://script.google.com/');
 }
 
-// Date → 'YYYY-MM-DD'
 function toISODate(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -426,7 +391,6 @@ function toISODate(date) {
   return `${y}-${m}-${d}`;
 }
 
-// 'YYYY-MM-DD' → '2024年4月28日（月）'
 function formatJpDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dow = new Date(y, m - 1, d).getDay();
@@ -435,11 +399,8 @@ function formatJpDate(dateStr) {
 
 function escapeHtml(str) {
   return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function setLoading(isLoading) {
@@ -457,7 +418,7 @@ function setLoading(isLoading) {
 }
 
 function resetFormFields() {
-  ['studentName', 'schoolName', 'phone', 'email', 'staffName', 'memo'].forEach(id => {
+  ['studentName', 'schoolName', 'staffName', 'memo'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.value = ''; el.classList.remove('is-error'); }
   });
