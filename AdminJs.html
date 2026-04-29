@@ -1,0 +1,861 @@
+<script>
+// ============================================================
+//  見学予約システム - 管理ページJS（GAS版）
+//  すべてのサーバー通信は google.script.run で行う
+// ============================================================
+
+var adminToken      = sessionStorage.getItem('adminToken') || '';
+var allReservations = [];
+var weekOffset      = 0;
+var calAvailability = {};
+var calAreaFilter   = '';
+var currentSlotDate   = null;
+var currentSlotTime   = null;
+var editMode          = false;
+var editReservationId = null;
+
+var THREE_HOUR_AREAS = ['東京', '埼玉'];
+var MAX_LANES        = 2;
+var DEADLINE_DAYS    = 7;
+var DAY_NAMES        = ['日', '月', '火', '水', '木', '金', '土'];
+var TIME_SLOTS       = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
+
+// ============================================================
+// ログイン
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+  // 既存トークンがあれば自動ログイン試行
+  if (adminToken) {
+    setLoginLoading(true);
+    google.script.run
+      .withSuccessHandler(function(result) {
+        setLoginLoading(false);
+        if (result.valid) {
+          showAdminInterface();
+        } else {
+          adminToken = '';
+          sessionStorage.removeItem('adminToken');
+        }
+      })
+      .withFailureHandler(function() {
+        setLoginLoading(false);
+        adminToken = '';
+        sessionStorage.removeItem('adminToken');
+      })
+      .verifyAdminToken(adminToken);
+  }
+
+  document.getElementById('tokenInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
+});
+
+function doLogin() {
+  var token = document.getElementById('tokenInput').value.trim();
+  if (!token) {
+    document.getElementById('loginError').textContent = 'トークンを入力してください';
+    return;
+  }
+  document.getElementById('loginError').textContent = '';
+  setLoginLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      setLoginLoading(false);
+      if (result.valid) {
+        adminToken = token;
+        sessionStorage.setItem('adminToken', token);
+        showAdminInterface();
+      } else {
+        document.getElementById('loginError').textContent = 'トークンが正しくありません';
+      }
+    })
+    .withFailureHandler(function(err) {
+      setLoginLoading(false);
+      document.getElementById('loginError').textContent = 'エラーが発生しました。再度お試しください。';
+      console.error('[ログイン] エラー:', err);
+    })
+    .verifyAdminToken(token);
+}
+
+function setLoginLoading(loading) {
+  var btn = document.getElementById('loginBtn');
+  var inp = document.getElementById('tokenInput');
+  if (btn) { btn.disabled = loading; btn.textContent = loading ? '確認中...' : 'ログイン'; }
+  if (inp) inp.disabled = loading;
+}
+
+function showAdminInterface() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('adminView').style.display = 'block';
+  loadReservations();
+}
+
+// ============================================================
+// タブ切り替え
+// ============================================================
+function switchTab(tab) {
+  document.querySelectorAll('.adm-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.getElementById('tabList').classList.toggle('active', tab === 'list');
+  document.getElementById('tabCalendar').classList.toggle('active', tab === 'calendar');
+  document.getElementById('listView').style.display     = tab === 'list'     ? 'block' : 'none';
+  document.getElementById('calendarView').style.display = tab === 'calendar' ? 'block' : 'none';
+
+  if (tab === 'list' && allReservations.length === 0) loadReservations();
+  if (tab === 'calendar') loadCalendarData();
+}
+
+// ============================================================
+// 予約一覧読み込み
+// ============================================================
+function loadReservations(params) {
+  showListState('loading');
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        allReservations = result.reservations || [];
+        renderList(allReservations);
+      } else {
+        console.error('[管理] 予約一覧取得エラー:', result.message);
+        showListState('error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('[管理] 予約一覧取得エラー:', err);
+      showListState('error');
+    })
+    .adminGetReservations(adminToken, params || {});
+}
+
+function showListState(state) {
+  document.getElementById('listLoading').style.display   = state === 'loading' ? 'flex'  : 'none';
+  document.getElementById('listError').style.display     = state === 'error'   ? 'flex'  : 'none';
+  document.getElementById('listEmpty').style.display     = state === 'empty'   ? 'flex'  : 'none';
+  document.getElementById('listTableWrap').style.display = state === 'table'   ? 'block' : 'none';
+}
+
+// ============================================================
+// 一覧描画
+// ============================================================
+function renderList(reservations) {
+  if (reservations.length === 0) { showListState('empty'); return; }
+
+  var tbody = document.getElementById('reservationTableBody');
+  tbody.innerHTML = '';
+
+  reservations.forEach(function(r) {
+    var tr = document.createElement('tr');
+    if (r['ステータス'] === 'キャンセル済み') tr.classList.add('is-cancelled');
+
+    var statusBadge = r['ステータス'] === '予約済み'
+      ? '<span class="status-badge status-badge--active">予約済み</span>'
+      : r['ステータス'] === 'キャンセル済み'
+      ? '<span class="status-badge status-badge--cancel">キャンセル済み</span>'
+      : '<span class="status-badge status-badge--other">' + escHtml(r['ステータス']) + '</span>';
+
+    var id   = escHtml(r['予約ID']);
+    var name = escHtml(r['代表者氏名']);
+
+    tr.innerHTML =
+      '<td style="font-size:.78rem;color:#757575">' + id + '</td>' +
+      '<td style="white-space:nowrap;font-size:.78rem">' + escHtml((r['受付日時'] || '').substring(0,16)) + '</td>' +
+      '<td><strong>' + name + '</strong></td>' +
+      '<td>' + escHtml(r['学校名']) + '</td>' +
+      '<td>' + escHtml(r['見学希望エリア']) + '</td>' +
+      '<td style="white-space:nowrap">' + escHtml(formatDate(r['希望日'])) + '</td>' +
+      '<td style="white-space:nowrap">' + escHtml(r['希望時間']) + '</td>' +
+      '<td style="text-align:center">' + escHtml(r['予約時間数']) + 'h</td>' +
+      '<td style="text-align:center">' + escHtml(r['予約人数']) + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td>' +
+        '<div class="td-actions">' +
+          '<button class="adm-btn adm-btn--outline adm-btn--sm" onclick="openDetailModal(\'' + id + '\')">詳細</button>' +
+          '<button class="adm-btn adm-btn--outline adm-btn--sm" onclick="openEditModal(\'' + id + '\')">編集</button>' +
+          (r['ステータス'] === '予約済み'
+            ? '<button class="adm-btn adm-btn--ghost adm-btn--sm" onclick="confirmCancel(\'' + id + '\',\'' + name + '\')">キャンセル</button>'
+            : '') +
+          '<button class="adm-btn adm-btn--sm" style="background:#ffcdd2;color:#c62828" onclick="confirmDelete(\'' + id + '\',\'' + name + '\')">削除</button>' +
+        '</div>' +
+      '</td>';
+    tbody.appendChild(tr);
+  });
+
+  showListState('table');
+}
+
+// ============================================================
+// フィルタ
+// ============================================================
+function applyListFilters() {
+  var date   = document.getElementById('filterDate').value;
+  var area   = document.getElementById('filterArea').value;
+  var status = document.getElementById('filterStatus').value;
+
+  var filtered = allReservations.filter(function(r) {
+    if (date   && r['希望日'] !== date)        return false;
+    if (area   && r['見学希望エリア'] !== area) return false;
+    if (status && r['ステータス'] !== status)  return false;
+    return true;
+  });
+  renderList(filtered);
+}
+
+function clearListFilters() {
+  document.getElementById('filterDate').value   = '';
+  document.getElementById('filterArea').value   = '';
+  document.getElementById('filterStatus').value = '';
+  renderList(allReservations);
+}
+
+// ============================================================
+// 詳細モーダル
+// ============================================================
+function openDetailModal(reservationId) {
+  var r = allReservations.find(function(x) { return x['予約ID'] === reservationId; });
+  if (!r) return;
+
+  var fields = [
+    ['予約ID',               r['予約ID']],
+    ['受付日時',             r['受付日時']],
+    ['代表者氏名',           r['代表者氏名']],
+    ['生年月日',             r['生年月日']],
+    ['電話番号',             r['電話番号']],
+    ['メールアドレス',        r['メールアドレス']],
+    ['学校名',               r['学校名']],
+    ['学年',                 r['学年']],
+    ['学科',                 r['学科']],
+    ['見学希望エリア',        r['見学希望エリア']],
+    ['希望日',               formatDate(r['希望日'])],
+    ['希望時間',             r['希望時間']],
+    ['予約時間数',           r['予約時間数'] + '時間'],
+    ['参加者1氏名',          r['参加者1氏名']],
+    ['参加者2氏名',          r['参加者2氏名'] || '─'],
+    ['参加者3氏名',          r['参加者3氏名'] || '─'],
+    ['予約人数',             r['予約人数'] + '名'],
+    ['メモ',                 r['メモ'] || '─'],
+    ['ステータス',           r['ステータス']],
+    ['カレンダーイベントID', r['GoogleカレンダーイベントID'] || '─'],
+  ];
+
+  var html = '<div class="adm-detail-grid">' +
+    fields.map(function(f) {
+      return '<span class="adm-detail-label">' + escHtml(f[0]) + '</span>' +
+             '<span class="adm-detail-value">' + escHtml(String(f[1] || '')) + '</span>';
+    }).join('') +
+  '</div>';
+
+  document.getElementById('detailContent').innerHTML = html;
+
+  var footer = document.getElementById('detailActions');
+  footer.innerHTML = '';
+
+  if (r['ステータス'] === '予約済み') {
+    var cancelBtn     = document.createElement('button');
+    cancelBtn.className   = 'adm-btn adm-btn--ghost';
+    cancelBtn.textContent = 'キャンセルする';
+    var rId = r['予約ID'], rName = r['代表者氏名'];
+    cancelBtn.onclick = function() { closeDetailModal(); confirmCancel(rId, rName); };
+    footer.appendChild(cancelBtn);
+  }
+
+  var editBtn = document.createElement('button');
+  editBtn.className   = 'adm-btn adm-btn--outline';
+  editBtn.textContent = '編集する';
+  var eId = r['予約ID'];
+  editBtn.onclick = function() { closeDetailModal(); openEditModal(eId); };
+  footer.appendChild(editBtn);
+
+  var deleteBtn     = document.createElement('button');
+  deleteBtn.className   = 'adm-btn adm-btn--sm';
+  deleteBtn.style.cssText = 'background:#ffcdd2;color:#c62828;';
+  deleteBtn.textContent = '削除する';
+  var dId = r['予約ID'], dName = r['代表者氏名'];
+  deleteBtn.onclick = function() { closeDetailModal(); confirmDelete(dId, dName); };
+  footer.appendChild(deleteBtn);
+
+  var closeBtn     = document.createElement('button');
+  closeBtn.className   = 'adm-btn adm-btn--ghost';
+  closeBtn.textContent = '閉じる';
+  closeBtn.onclick     = closeDetailModal;
+  footer.appendChild(closeBtn);
+
+  document.getElementById('detailModal').classList.add('is-open');
+}
+
+function closeDetailModal() {
+  document.getElementById('detailModal').classList.remove('is-open');
+}
+
+// ============================================================
+// キャンセル確認
+// ============================================================
+function confirmCancel(reservationId, name) {
+  document.getElementById('confirmTitle').textContent   = 'キャンセルの確認';
+  document.getElementById('confirmMessage').textContent =
+    '「' + name + '」様の予約をキャンセルしますか？\nデータは残りますがステータスが「キャンセル済み」に変わります。';
+  document.getElementById('confirmOkBtn').className     = 'adm-btn adm-btn--ghost adm-btn--lg';
+  document.getElementById('confirmOkBtn').style.background = '#e65100';
+  document.getElementById('confirmOkBtn').style.color      = '#fff';
+  document.getElementById('confirmOkBtn').onclick          = function() { executeCancel(reservationId); };
+  document.getElementById('confirmModal').classList.add('is-open');
+}
+
+function executeCancel(reservationId) {
+  closeConfirmModal();
+  showOverlay(true);
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showOverlay(false);
+      if (result.success) {
+        showToast('キャンセルしました', 'success');
+        invalidateCalCache();
+        loadReservations();
+      } else {
+        showToast('エラー: ' + result.message, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      showOverlay(false);
+      showToast('通信エラー', 'error');
+    })
+    .adminCancelReservation(adminToken, reservationId);
+}
+
+// ============================================================
+// 削除確認
+// ============================================================
+function confirmDelete(reservationId, name) {
+  document.getElementById('confirmTitle').textContent   = '削除の確認';
+  document.getElementById('confirmMessage').textContent =
+    '「' + name + '」様の予約を完全に削除します。\nこの操作は元に戻せません。本当に削除しますか？';
+  document.getElementById('confirmOkBtn').className     = 'adm-btn adm-btn--danger adm-btn--lg';
+  document.getElementById('confirmOkBtn').style.background = '';
+  document.getElementById('confirmOkBtn').style.color      = '';
+  document.getElementById('confirmOkBtn').onclick          = function() { executeDelete(reservationId); };
+  document.getElementById('confirmModal').classList.add('is-open');
+}
+
+function executeDelete(reservationId) {
+  closeConfirmModal();
+  showOverlay(true);
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showOverlay(false);
+      if (result.success) {
+        showToast('削除しました', 'success');
+        invalidateCalCache();
+        loadReservations();
+      } else {
+        showToast('エラー: ' + result.message, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      showOverlay(false);
+      showToast('通信エラー', 'error');
+    })
+    .adminDeleteReservation(adminToken, reservationId);
+}
+
+function closeConfirmModal() {
+  document.getElementById('confirmModal').classList.remove('is-open');
+}
+
+// ============================================================
+// カレンダービュー
+// ============================================================
+function onCalAreaChange() {
+  calAreaFilter = document.getElementById('calAreaSelect').value;
+  var mondayStr = calMondayStr();
+  if (calAvailability[mondayStr]) {
+    renderCalendarTable(getCalWeekDates(), calAvailability[mondayStr]);
+  }
+}
+
+function onCalPrev()  { if (weekOffset > -2)  { weekOffset--; loadCalendarData(); } }
+function onCalNext()  { if (weekOffset < 12)  { weekOffset++; loadCalendarData(); } }
+function onCalToday() { weekOffset = 0; loadCalendarData(); }
+
+function calMondayStr() { return toISODate(getCalMonday()); }
+
+function getCalMonday() {
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var dow  = today.getDay();
+  var diff = dow === 0 ? -6 : 1 - dow;
+  var mon  = new Date(today);
+  mon.setDate(today.getDate() + diff + weekOffset * 7);
+  return mon;
+}
+
+function getCalWeekDates() {
+  var mon = getCalMonday();
+  return Array.from({ length: 7 }, function(_, i) {
+    var d = new Date(mon);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+}
+
+function updateCalWeekNav() {
+  var dates = getCalWeekDates();
+  document.getElementById('calWeekLabel').textContent =
+    (dates[0].getMonth()+1) + '月' + dates[0].getDate() + '日 〜 ' +
+    (dates[6].getMonth()+1) + '月' + dates[6].getDate() + '日';
+  document.getElementById('calPrevWeek').disabled = weekOffset <= -2;
+  document.getElementById('calNextWeek').disabled = weekOffset >= 12;
+  document.getElementById('calTodayBtn').style.display = weekOffset !== 0 ? 'inline-block' : 'none';
+}
+
+function loadCalendarData() {
+  updateCalWeekNav();
+  var mondayStr = calMondayStr();
+
+  if (calAvailability[mondayStr]) {
+    renderCalendarTable(getCalWeekDates(), calAvailability[mondayStr]);
+    return;
+  }
+
+  setCalState('loading');
+
+  // 空き状況と予約一覧を並行取得
+  var gotAvail = false, gotRes = false;
+  var availData = null;
+
+  function tryRender() {
+    if (!gotAvail || !gotRes) return;
+    if (availData) {
+      calAvailability[mondayStr] = availData;
+      renderCalendarTable(getCalWeekDates(), calAvailability[mondayStr]);
+    } else {
+      setCalState('error');
+    }
+  }
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      gotAvail = true;
+      if (result.success) availData = result.availability;
+      tryRender();
+    })
+    .withFailureHandler(function(err) {
+      gotAvail = true;
+      console.error('[カレンダー] 空き状況取得エラー:', err);
+      tryRender();
+    })
+    .adminGetWeekAvailability(adminToken, mondayStr);
+
+  var sundayStr = toISODate(getCalWeekDates()[6]);
+  google.script.run
+    .withSuccessHandler(function(result) {
+      gotRes = true;
+      if (result.success) {
+        (result.reservations || []).forEach(function(r) {
+          if (!allReservations.find(function(x) { return x['予約ID'] === r['予約ID']; })) {
+            allReservations.push(r);
+          }
+        });
+      }
+      tryRender();
+    })
+    .withFailureHandler(function() {
+      gotRes = true;
+      tryRender();
+    })
+    .adminGetReservations(adminToken, { startDate: mondayStr, endDate: sundayStr });
+}
+
+function setCalState(state) {
+  document.getElementById('calLoading').style.display   = state === 'loading' ? 'flex'  : 'none';
+  document.getElementById('calError').style.display     = state === 'error'   ? 'flex'  : 'none';
+  document.getElementById('calTableWrap').style.display = state === 'table'   ? 'block' : 'none';
+}
+
+function renderCalendarTable(weekDates, availability) {
+  var table = document.getElementById('calTable');
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  table.innerHTML = '';
+
+  var thead = table.createTHead();
+  var hRow  = thead.insertRow();
+
+  var thTime = document.createElement('th');
+  thTime.className = 'adm-cal-th-time';
+  thTime.textContent = '時間';
+  hRow.appendChild(thTime);
+
+  weekDates.forEach(function(date) {
+    var th  = document.createElement('th');
+    var dow = date.getDay();
+    var isToday = date.getTime() === today.getTime();
+    var cls = 'adm-cal-th-date';
+    if (isToday)   cls += ' adm-th-today';
+    if (dow === 6) cls += ' adm-th-sat';
+    if (dow === 0) cls += ' adm-th-sun';
+    th.className = cls;
+    th.innerHTML = '<span class="adm-th-day">' + DAY_NAMES[dow] + '</span>' +
+                   '<span class="adm-th-date-num">' + (date.getMonth()+1) + '/' + date.getDate() + '</span>';
+    hRow.appendChild(th);
+  });
+
+  var tbody = table.createTBody();
+
+  TIME_SLOTS.forEach(function(time) {
+    var tr = tbody.insertRow();
+
+    var tdTime = tr.insertCell();
+    tdTime.className = 'adm-cal-td-time';
+    tdTime.textContent = time;
+
+    weekDates.forEach(function(date) {
+      var dateStr = toISODate(date);
+      var td      = tr.insertCell();
+      var dow     = date.getDay();
+
+      var cls = 'adm-cal-td-slot';
+      if (date.getTime() === today.getTime()) cls += ' adm-cal-td-today';
+      else if (dow === 6) cls += ' adm-cal-td-sat';
+      else if (dow === 0) cls += ' adm-cal-td-sun';
+      td.className = cls;
+
+      var slotCount = countReservationsInSlot(dateStr, time);
+      var isPast    = isSlotPast(date, time);
+      var isDeadline = !isPast && isBeforeDeadline(date);
+      var laneCount  = ((availability[dateStr] || {})[time]) || 0;
+      var status     = getSlotStatus(availability, dateStr, time, calAreaFilter);
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+
+      if (isPast) {
+        btn.className   = 'adm-slot-deadline';
+        btn.textContent = '─';
+        btn.disabled    = true;
+      } else if (isDeadline) {
+        btn.className   = laneCount >= MAX_LANES ? 'adm-slot-x' : (laneCount === 1 ? 'adm-slot-tri' : 'adm-slot-o');
+        btn.textContent = laneCount >= MAX_LANES ? '×' : (laneCount === 1 ? '△' : '〇');
+        btn.style.opacity = '0.7';
+        btn.setAttribute('aria-label', formatDate(dateStr) + ' ' + time + ' （締切済）');
+        (function(ds, ts) { btn.addEventListener('click', function() { openSlotModal(ds, ts); }); })(dateStr, time);
+      } else {
+        btn.className   = status === 'x' ? 'adm-slot-x' : (status === 'tri' ? 'adm-slot-tri' : 'adm-slot-o');
+        btn.textContent = status === 'x' ? '×' : (status === 'tri' ? '△' : '〇');
+        btn.setAttribute('aria-label', formatDate(dateStr) + ' ' + time + ' 予約状況を確認');
+        (function(ds, ts) { btn.addEventListener('click', function() { openSlotModal(ds, ts); }); })(dateStr, time);
+      }
+
+      if (slotCount > 0 && !isPast) {
+        var badge = document.createElement('span');
+        badge.className   = 'adm-slot-badge';
+        badge.textContent = slotCount;
+        btn.style.position = 'relative';
+        btn.appendChild(badge);
+      }
+
+      td.appendChild(btn);
+    });
+  });
+
+  setCalState('table');
+}
+
+function getSlotStatus(availability, dateStr, time, area) {
+  if (!area) {
+    var count = ((availability[dateStr] || {})[time]) || 0;
+    if (count >= MAX_LANES) return 'x';
+    if (count === 1) return 'tri';
+    return 'o';
+  }
+  var duration  = THREE_HOUR_AREAS.indexOf(area) !== -1 ? 3 : 1;
+  var startHour = parseInt(time.split(':')[0], 10);
+  if (startHour + duration > 18) return 'x';
+  var maxLanes = 0;
+  for (var h = 0; h < duration; h++) {
+    var checkHour = startHour + h;
+    var checkTime = (checkHour < 10 ? '0' : '') + checkHour + ':00';
+    var lanes = ((availability[dateStr] || {})[checkTime]) || 0;
+    if (lanes >= MAX_LANES) return 'x';
+    if (lanes > maxLanes) maxLanes = lanes;
+  }
+  return maxLanes === 0 ? 'o' : maxLanes === 1 ? 'tri' : 'x';
+}
+
+function countReservationsInSlot(dateStr, timeStr) {
+  var slotHour = parseInt(timeStr.split(':')[0], 10);
+  return allReservations.filter(function(r) {
+    if (r['希望日'] !== dateStr) return false;
+    if (r['ステータス'] !== '予約済み') return false;
+    var startHour = parseInt((r['希望時間'] || '').split(':')[0], 10);
+    var hours     = parseInt(r['予約時間数'], 10) || 1;
+    return slotHour >= startHour && slotHour < startHour + hours;
+  }).length;
+}
+
+function isSlotPast(dateObj, timeStr) {
+  var now = new Date();
+  var h   = parseInt(timeStr.split(':')[0], 10);
+  var slot = new Date(dateObj);
+  slot.setHours(h, 0, 0, 0);
+  return slot < now;
+}
+
+function isBeforeDeadline(dateObj) {
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var diff = (dateObj - today) / (1000 * 60 * 60 * 24);
+  return diff < DEADLINE_DAYS;
+}
+
+// ============================================================
+// スロットモーダル
+// ============================================================
+function openSlotModal(dateStr, time) {
+  currentSlotDate = dateStr;
+  currentSlotTime = time;
+
+  var duration = calAreaFilter ? (THREE_HOUR_AREAS.indexOf(calAreaFilter) !== -1 ? 3 : 1) : 1;
+  var endHour  = parseInt(time.split(':')[0], 10) + duration;
+  var endTime  = '〜' + (endHour < 10 ? '0' : '') + endHour + ':00';
+
+  document.getElementById('slotModalTitle').textContent =
+    formatDate(dateStr) + ' ' + time + (calAreaFilter ? endTime : '');
+
+  var slotHour = parseInt(time.split(':')[0], 10);
+  var rsvList  = allReservations.filter(function(r) {
+    if (r['希望日'] !== dateStr) return false;
+    var startHour = parseInt((r['希望時間'] || '').split(':')[0], 10);
+    var hours     = parseInt(r['予約時間数'], 10) || 1;
+    return slotHour >= startHour && slotHour < startHour + hours;
+  });
+
+  var activeCount = rsvList.filter(function(r) { return r['ステータス'] === '予約済み'; }).length;
+  var html = '<div class="adm-slot-info"><p class="adm-slot-info__title">現在の予約（' + activeCount + '/' + MAX_LANES + '枠）</p></div>';
+
+  if (rsvList.length === 0) {
+    html += '<p style="color:#757575;font-size:.88rem;padding:8px 0">まだ予約はありません</p>';
+  } else {
+    html += '<div class="adm-slot-reservations">';
+    rsvList.forEach(function(r) {
+      var isCancelled = r['ステータス'] === 'キャンセル済み';
+      var rid  = escHtml(r['予約ID']);
+      var rname = escHtml(r['代表者氏名']);
+      html +=
+        '<div class="adm-slot-reservation-item ' + (isCancelled ? 'is-cancelled' : '') + '">' +
+          '<div>' +
+            '<p class="adm-slot-res-name">' + rname + (isCancelled ? ' （キャンセル済）' : '') + '</p>' +
+            '<p class="adm-slot-res-sub">' + escHtml(r['学校名']) + ' / ' + escHtml(r['見学希望エリア']) + ' / ' + escHtml(r['予約人数']) + '名</p>' +
+            '<p class="adm-slot-res-sub">' + escHtml(r['電話番号']) + '　' + escHtml(r['メールアドレス']) + '</p>' +
+            '<p class="adm-slot-res-sub" style="font-size:.72rem;color:#9e9e9e">' + rid + '</p>' +
+          '</div>' +
+          '<div class="adm-slot-res-actions">' +
+            '<button class="adm-btn adm-btn--outline adm-btn--sm" onclick="closeSlotModal();openDetailModal(\'' + rid + '\')">詳細</button>' +
+            (!isCancelled ? '<button class="adm-btn adm-btn--ghost adm-btn--sm" onclick="closeSlotModal();confirmCancel(\'' + rid + '\',\'' + rname + '\')">取消</button>' : '') +
+          '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('slotContent').innerHTML = html;
+
+  var addBtn = document.getElementById('slotAddBtn');
+  addBtn.disabled = activeCount >= MAX_LANES;
+  addBtn.onclick  = function() { closeSlotModal(); openAddModal(dateStr, time); };
+
+  document.getElementById('slotModal').classList.add('is-open');
+}
+
+function closeSlotModal() {
+  document.getElementById('slotModal').classList.remove('is-open');
+}
+
+// ============================================================
+// 予約追加モーダル
+// ============================================================
+function openAddModal(date, time) {
+  editMode = false;
+  editReservationId = null;
+  document.getElementById('addModalTitle').textContent = '予約追加';
+  document.getElementById('addSubmitBtn').textContent  = '予約を追加する';
+
+  document.getElementById('addForm').reset();
+  document.querySelectorAll('#addForm .adm-error').forEach(function(el) { el.textContent = ''; });
+  document.querySelectorAll('#addForm .adm-input').forEach(function(el) { el.classList.remove('is-error'); });
+
+  if (date) document.getElementById('add_date').value = date;
+  if (time) document.getElementById('add_time').value = time;
+  if (calAreaFilter) document.getElementById('add_area').value = calAreaFilter;
+
+  document.getElementById('addModal').classList.add('is-open');
+}
+
+function openEditModal(reservationId) {
+  var r = allReservations.find(function(x) { return x['予約ID'] === reservationId; });
+  if (!r) return;
+
+  editMode = true;
+  editReservationId = reservationId;
+
+  document.getElementById('addForm').reset();
+  document.querySelectorAll('#addForm .adm-error').forEach(function(el) { el.textContent = ''; });
+  document.querySelectorAll('#addForm .adm-input').forEach(function(el) { el.classList.remove('is-error'); });
+
+  document.getElementById('add_representativeName').value = r['代表者氏名']    || '';
+  document.getElementById('add_birthDate').value          = r['生年月日']      || '';
+  document.getElementById('add_phone').value              = r['電話番号']      || '';
+  document.getElementById('add_email').value              = r['メールアドレス'] || '';
+  document.getElementById('add_schoolName').value         = r['学校名']        || '';
+  document.getElementById('add_grade').value              = r['学年']          || '';
+  document.getElementById('add_department').value         = r['学科']          || '';
+  document.getElementById('add_area').value               = r['見学希望エリア'] || '';
+  document.getElementById('add_date').value               = r['希望日']        || '';
+  document.getElementById('add_time').value               = r['希望時間']      || '';
+  document.getElementById('add_participant1').value       = r['参加者1氏名']   || '';
+  document.getElementById('add_participant2').value       = r['参加者2氏名']   || '';
+  document.getElementById('add_participant3').value       = r['参加者3氏名']   || '';
+  document.getElementById('add_memo').value               = r['メモ']          || '';
+
+  document.getElementById('addModalTitle').textContent = '予約編集（' + escHtml(r['予約ID']) + '）';
+  document.getElementById('addSubmitBtn').textContent  = '変更を保存する';
+
+  document.getElementById('addModal').classList.add('is-open');
+}
+
+function closeAddModal() {
+  document.getElementById('addModal').classList.remove('is-open');
+}
+
+function submitAddForm() {
+  var requiredText = [
+    { id: 'add_representativeName', label: '代表者氏名' },
+    { id: 'add_birthDate',          label: '生年月日' },
+    { id: 'add_phone',              label: '電話番号' },
+    { id: 'add_email',              label: 'メールアドレス' },
+    { id: 'add_schoolName',         label: '学校名' },
+    { id: 'add_department',         label: '学科' },
+    { id: 'add_participant1',       label: '参加者1氏名' },
+  ];
+  var requiredSelect = [
+    { id: 'add_grade', label: '学年' },
+    { id: 'add_area',  label: '見学希望エリア' },
+    { id: 'add_date',  label: '希望日' },
+    { id: 'add_time',  label: '希望時間' },
+  ];
+
+  var valid = true;
+  requiredText.concat(requiredSelect).forEach(function(f) {
+    var el = document.getElementById(f.id);
+    if (!el.value.trim()) {
+      el.classList.add('is-error');
+      var err = document.getElementById(f.id + 'Error');
+      if (err) err.textContent = f.label + 'を入力してください';
+      valid = false;
+    }
+  });
+
+  if (!valid) return;
+
+  var payload = {
+    representativeName: document.getElementById('add_representativeName').value.trim(),
+    birthDate:          document.getElementById('add_birthDate').value.trim(),
+    phone:              document.getElementById('add_phone').value.trim(),
+    email:              document.getElementById('add_email').value.trim(),
+    schoolName:         document.getElementById('add_schoolName').value.trim(),
+    grade:              document.getElementById('add_grade').value,
+    department:         document.getElementById('add_department').value.trim(),
+    area:               document.getElementById('add_area').value,
+    date:               document.getElementById('add_date').value,
+    time:               document.getElementById('add_time').value,
+    participant1:       document.getElementById('add_participant1').value.trim(),
+    participant2:       document.getElementById('add_participant2').value.trim(),
+    participant3:       document.getElementById('add_participant3').value.trim(),
+    memo:               document.getElementById('add_memo').value.trim(),
+  };
+
+  var submitBtn = document.getElementById('addSubmitBtn');
+  submitBtn.disabled = true;
+  showOverlay(true);
+
+  var isEdit = editMode;
+
+  function onSuccess(result) {
+    submitBtn.disabled = false;
+    showOverlay(false);
+    if (result.success) {
+      showToast(isEdit ? '変更を保存しました' : '予約を追加しました（' + result.reservationId + '）', 'success');
+      closeAddModal();
+      invalidateCalCache();
+      loadReservations();
+      if (document.getElementById('calendarView').style.display !== 'none') {
+        loadCalendarData();
+      }
+    } else {
+      showToast('エラー: ' + result.message, 'error');
+    }
+  }
+
+  function onFailure() {
+    submitBtn.disabled = false;
+    showOverlay(false);
+    showToast('通信エラー', 'error');
+  }
+
+  if (isEdit) {
+    payload.reservationId = editReservationId;
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onFailure)
+      .adminUpdateReservation(adminToken, payload);
+  } else {
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onFailure)
+      .adminCreateReservation(adminToken, payload);
+  }
+}
+
+// ============================================================
+// UI ヘルパー
+// ============================================================
+function invalidateCalCache() {
+  Object.keys(calAvailability).forEach(function(k) { delete calAvailability[k]; });
+}
+
+function showOverlay(visible) {
+  document.getElementById('admLoadingOverlay').classList.toggle('is-visible', visible);
+}
+
+var toastTimer = null;
+function showToast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'adm-toast is-show' + (type === 'success' ? ' is-success' : type === 'error' ? ' is-error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { el.className = 'adm-toast'; }, 3000);
+}
+
+function toISODate(date) {
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  // "2026-05-06 00:00:00" のような形式でも先頭10文字だけ使う
+  var dateOnly = String(dateStr).substring(0, 10).trim();
+  if (!dateOnly.includes('-')) return String(dateStr);
+  var parts = dateOnly.split('-').map(Number);
+  if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) return String(dateStr);
+  var dow = new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+  return parts[0] + '年' + parts[1] + '月' + parts[2] + '日（' + DAY_NAMES[dow] + '）';
+}
+
+function escHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+</script>
