@@ -6,8 +6,9 @@
 // ============================================================
 // ★★★ 設定定数（必要に応じて変更してください）★★★
 // ============================================================
-const GAS_URL      = 'https://script.google.com/macros/s/AKfycbzDTdIS8RcWP6omnqsi6gZgDD2E_Ndp0b8l9HqSLM31XlW_vFGhF3Wh1gvQnFy9WIRt/exec';
-const LINE_ADD_URL = 'ここにLINE友だち追加URL'; // 例: https://lin.ee/xxxxxxx
+const GAS_URL          = 'https://script.google.com/macros/s/AKfycbzDTdIS8RcWP6omnqsi6gZgDD2E_Ndp0b8l9HqSLM31XlW_vFGhF3Wh1gvQnFy9WIRt/exec';
+const LINE_ADD_URL     = 'ここにLINE友だち追加URL'; // 例: https://lin.ee/xxxxxxx
+const PUBLIC_API_TOKEN = 'leaf-public-2024'; // code.gsのPUBLIC_API_TOKENと同じ値
 
 // ============================================================
 // 定数
@@ -161,7 +162,7 @@ async function loadWeekData() {
   }
 
   try {
-    const url = `${GAS_URL}?action=getWeekAvailability&startDate=${encodeURIComponent(mondayStr)}`;
+    const url = `${GAS_URL}?action=getWeekAvailability&startDate=${encodeURIComponent(mondayStr)}&token=${encodeURIComponent(PUBLIC_API_TOKEN)}`;
     console.log('[見学予約] 取得URL:', url);
     const res  = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -453,6 +454,7 @@ async function handleSubmit(e) {
 
   const payload = {
     action:             'createReservation',
+    token:              PUBLIC_API_TOKEN,
     representativeName: document.getElementById('representativeName').value.trim(),
     birthDate:          document.getElementById('birthDate').value.trim(),
     phone:              document.getElementById('phone').value.trim(),

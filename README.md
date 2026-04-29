@@ -4,19 +4,46 @@
 
 ---
 
+## セキュリティ構成の概要
+
+| 場所 | 役割 | 個人情報 |
+|------|------|----------|
+| GitHub Pages | 学生向け予約ページのみ（静的ファイル） | **含まない** |
+| Google Apps Script | APIバックエンド＋管理画面 | スプレッドシートに保存 |
+
+- **管理画面はGitHub Pagesに存在しません。** GASのURL（`?action=admin`）でのみアクセスできます。
+- `getWeekAvailability` APIが返すのは「各スロットの予約数のみ」で、個人情報は一切含みません。
+- ADMIN_API_TOKENはGASのコード内のみ。GitHubには絶対に上げないでください。
+
+> ⚠️ **PUBLIC_API_TOKEN（script.jsに記載）はブラウザのDevToolsで誰でも確認できます。**  
+> これはある程度容認された設計です。本格的なアクセス制御はFirebase AuthなどのGoogleログイン連携を推奨します。
+
+> ⚠️ **スプレッドシートは絶対に「一般公開」にしないでください。**  
+> 個人情報（氏名・電話番号・メールアドレス等）が含まれています。
+
+---
+
 ## ファイル構成
 
+### GitHubにアップするファイル（学生向けのみ）
+
 ```
-kengaku-reservation/
-├── index.html   # 学生用予約ページ
-├── style.css    # 学生用スタイル
-├── script.js    # 学生用JavaScript
-├── admin.html   # 社内用管理ページ
-├── admin.css    # 管理ページスタイル
-├── admin.js     # 管理ページJavaScript
-├── code.gs      # Google Apps Script（バックエンド）
-└── README.md    # このファイル
+index.html   # 学生用予約ページ
+style.css    # 学生用スタイル
+script.js    # 学生用JavaScript（PUBLIC_API_TOKENを含む）
+README.md    # このファイル
 ```
+
+### GASプロジェクト内に作成するファイル
+
+```
+code.gs       # バックエンドロジック（ADMIN_API_TOKENを含む）
+Admin.html    # 管理画面テンプレート（ログイン画面＋管理UI）
+AdminCss.html # 管理画面CSS（<style>タグ）
+AdminJs.html  # 管理画面JavaScript（<script>タグ）
+```
+
+> `admin.html`・`admin.css`・`admin.js` はGitHub Pagesから削除してください（旧版・廃止）
 
 ---
 
@@ -25,14 +52,14 @@ kengaku-reservation/
 1. [Googleスプレッドシートを作る](#1-googleスプレッドシートを作る)
 2. [Google Apps Scriptを設定する](#2-google-apps-scriptを設定する)
 3. [ウェブアプリとしてデプロイする](#3-ウェブアプリとしてデプロイする)
-4. [GAS_URLをscript.jsとadmin.jsに貼り付ける](#4-gas_urlをscriptjsとadminjsに貼り付ける)
+4. [設定定数を変更する](#4-設定定数を変更する)
 5. [LINE友だち追加URLを設定する](#5-line友だち追加urlを設定する)
 6. [Googleカレンダー連携を設定する（任意）](#6-googleカレンダー連携を設定する任意)
 7. [GitHubにアップしてGitHub Pagesで公開する](#7-githubにアップしてgithub-pagesで公開する)
 8. [スプレッドシートの列構成](#8-スプレッドシートの列構成)
 9. [予約枠のルール](#9-予約枠のルール)
 10. [テスト手順](#10-テスト手順)
-11. [管理ページについて（重要）](#11-管理ページについて重要)
+11. [管理ページについて](#11-管理ページについて)
 12. [よくあるトラブル](#12-よくあるトラブル)
 
 ---
@@ -52,7 +79,11 @@ kengaku-reservation/
 1. スプレッドシートの「拡張機能」→「Apps Script」を開く
 2. `コード.gs` の中身を**すべて消す**
 3. このリポジトリの **`code.gs`** の内容をまるごとコピーして貼り付ける
-4. `Ctrl+S` で保存
+4. GASプロジェクトの「ファイル」→「＋」→「HTML」で以下3ファイルを追加：
+   - `Admin`（`Admin.html`の内容を貼り付け）
+   - `AdminCss`（`AdminCss.html`の内容を貼り付け）
+   - `AdminJs`（`AdminJs.html`の内容を貼り付け）
+5. `Ctrl+S` で保存
 
 ---
 
@@ -67,34 +98,44 @@ kengaku-reservation/
 | 項目 | 設定値 |
 |------|--------|
 | 次のユーザーとして実行 | **自分（Googleアカウント）** |
-| アクセスできるユーザー | **全員** |
+| アクセスできるユーザー | **全員**（学生からのアクセスが必要なため） |
 
-4. 「デプロイ」→ 「アクセスを承認」→ Googleアカウントを選択 → 「許可」
+4. 「デプロイ」→「アクセスを承認」→ Googleアカウントを選択 →「許可」
 5. **ウェブアプリのURL**をコピー（次のステップで使用）
 
 ```
 例: https://script.google.com/macros/s/AKfycb.../exec
 ```
 
+| URL | 用途 |
+|-----|------|
+| `[GAS_URL]` | 学生向けAPIエンドポイント |
+| `[GAS_URL]?action=admin` | 管理画面（採用チームのみ共有） |
+
 > **コードを変更した際は必ず再デプロイしてください（「デプロイを管理」→ ✏️ →「新しいバージョン」→「デプロイ」）**
 
 ---
 
-## 4. GAS_URLをscript.jsとadmin.jsに貼り付ける
+## 4. 設定定数を変更する
 
-**`script.js`** の先頭：
-
-```javascript
-const GAS_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
-```
-
-**`admin.js`** の先頭：
+### `code.gs`（GAS内）
 
 ```javascript
-const GAS_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
+var PUBLIC_API_TOKEN = 'leaf-public-2024';    // script.jsと同じ値に変更
+var ADMIN_API_TOKEN  = 'leaf-admin-secret';   // 管理者トークン（任意の文字列に変更）
+var CALENDAR_ID      = 'ここにGoogleカレンダーID'; // 不要なら空文字のまま
 ```
 
-2つのファイルに**同じURL**を貼り付けてください。
+### `script.js`（GitHub）
+
+```javascript
+const GAS_URL          = 'https://script.google.com/macros/s/AKfycb.../exec'; // GASのURL
+const LINE_ADD_URL     = 'ここにLINE友だち追加URL';
+const PUBLIC_API_TOKEN = 'leaf-public-2024'; // code.gsと同じ値
+```
+
+> `PUBLIC_API_TOKEN` はscript.jsとcode.gsで**同じ値**を設定してください。  
+> `ADMIN_API_TOKEN` は**code.gsのみ**に記載します。GitHubには絶対にアップしないでください。
 
 ---
 
@@ -116,7 +157,7 @@ LINE Official Account Managerで友だち追加リンクを確認できます。
 **`code.gs`** の先頭：
 
 ```javascript
-const CALENDAR_ID = 'ここにGoogleカレンダーID';
+var CALENDAR_ID = 'ここにGoogleカレンダーID';
 // 例: 'example@group.calendar.google.com'
 ```
 
@@ -132,19 +173,17 @@ const CALENDAR_ID = 'ここにGoogleカレンダーID';
 
 ## 7. GitHubにアップしてGitHub Pagesで公開する
 
-### アップロードするファイル
+### アップロードするファイル（学生向けのみ）
 
 ```
 index.html
 style.css
 script.js
-admin.html
-admin.css
-admin.js
 README.md
 ```
 
-> `code.gs` はGitHubにアップ**しない**（GASで管理）
+> **アップロードしないファイル：**  
+> `code.gs`・`Admin.html`・`AdminCss.html`・`AdminJs.html`・`admin.html`・`admin.css`・`admin.js`
 
 ### GitHub Pages有効化
 
@@ -153,9 +192,12 @@ README.md
 3. Branch: `main` / フォルダ: `/ (root)`
 4. Save
 
-公開後のURL：
-- 学生用: `https://あなたのユーザー名.github.io/kengaku-reservation/`
-- 管理用: `https://あなたのユーザー名.github.io/kengaku-reservation/admin.html`
+### 公開後のURL
+
+| 用途 | URL |
+|------|-----|
+| 学生向け予約ページ | `https://あなたのユーザー名.github.io/kengaku-reservation/` |
+| 管理ページ | `[GASのURL]?action=admin`（GitHub Pagesには存在しない） |
 
 ---
 
@@ -221,9 +263,9 @@ README.md
 → {"success":true,"message":"GAS is running..."} が表示されればOK
 ```
 
-空き状況取得のテスト：
+空き状況取得のテスト（PUBLIC_API_TOKENを指定）：
 ```
-[URL]?action=getWeekAvailability&startDate=2026-05-05
+[URL]?action=getWeekAvailability&startDate=2026-05-05&token=leaf-public-2024
 → {"success":true,"availability":{...}} が表示されればOK
 ```
 
@@ -244,33 +286,43 @@ GASエディタから手動実行：
 
 ### Step 3: 管理ページのテスト
 
-1. `admin.html` を開く
-2. 予約一覧に先ほどのテスト予約が表示されることを確認
-3. 「詳細」でモーダルが開くことを確認
-4. 「カレンダー」タブで予約表が表示されることを確認
-5. 「予約追加」から新しい予約を追加できることを確認
-6. 「キャンセル」でステータスが「キャンセル済み」になることを確認
-7. 「削除」で確認ダイアログが出て削除できることを確認
+1. `[GASのURL]?action=admin` を開く
+2. ログイン画面が表示されることを確認
+3. `ADMIN_API_TOKEN`（code.gsに設定した値）を入力してログイン
+4. 予約一覧に先ほどのテスト予約が表示されることを確認
+5. 「詳細」でモーダルが開くことを確認
+6. 「カレンダー」タブで予約表が表示されることを確認
+7. 「予約追加」から新しい予約を追加できることを確認
+8. 「キャンセル」でステータスが「キャンセル済み」になることを確認
+9. 「削除」で確認ダイアログが出て削除できることを確認
 
 ---
 
-## 11. 管理ページについて（重要）
+## 11. 管理ページについて
 
-> ⚠️ **セキュリティに関する注意**
+### アクセス方法
 
-`admin.html` のURLを知っている人であれば、予約の追加・キャンセル・削除ができます。
+管理画面は GitHub Pages には存在せず、GASのURLからのみアクセスできます：
 
-- **採用チーム内だけで**URLを共有してください
-- URLは `https://...github.io/kengaku-reservation/admin.html` の形式です
-- **学生向け導線（HP、Instagram、LINE）にはadmin.htmlのURLを掲載しないでください**
+```
+[GASのURL]?action=admin
+```
+
+ページを開くとログイン画面が表示され、`ADMIN_API_TOKEN`（`code.gs`に設定した値）を入力するとログインできます。
+
+### セキュリティについて
+
+- 管理画面はGAS HTML Serviceで提供されるため、HTMLソースコードはGitHubに含まれません
+- 個人情報へのアクセスにはADMIN_API_TOKENが必要です
+- トークンはブラウザのsessionStorageに保存され、タブを閉じると消えます
+
+> ⚠️ **注意：** ADMIN_API_TOKENは固定文字列のため、知っている人であれば誰でも管理画面にアクセスできます。  
+> **採用チーム内だけでGAS URLを共有してください。**
 
 ### 将来的なセキュリティ強化（実装例）
 
-- **パスワード認証**: admin.jsの先頭にパスワードチェックを追加
-- **Googleログイン**: Firebase Authenticationと連携
-- **Basic認証**: GitHub Pagesでは使用不可（別のホスティングが必要）
-
-現在のコードはログイン機能を追加しやすい構成になっています。
+- **Googleログイン**: Firebase AuthenticationやIdentity-Aware Proxyと連携
+- **GASのデプロイ設定変更**: 「アクセスできるユーザー」を「組織内のユーザー全員」または「自分のみ」に設定すると、管理画面に組織アカウントでのログインが必要になります（ただし学生向けAPIも制限されるため要注意）
 
 ---
 
@@ -280,8 +332,9 @@ GASエディタから手動実行：
 
 **A.**
 - ブラウザのコンソール（F12）でエラーを確認
-- `script.js` のGAS_URLが正しいか確認
+- `script.js` の `GAS_URL` と `PUBLIC_API_TOKEN` が正しいか確認
 - GASのデプロイ設定で「アクセスできるユーザー」が「全員」になっているか確認
+- `code.gs` の `PUBLIC_API_TOKEN` と `script.js` の `PUBLIC_API_TOKEN` が一致しているか確認
 
 ### Q. 予約送信後にエラーが出る
 
@@ -289,6 +342,12 @@ GASエディタから手動実行：
 - GASのデプロイが最新バージョンになっているか確認
 - GASのログ（実行数 → 最新の実行）でエラー内容を確認
 - `testCreateReservation` を手動実行して動作確認
+
+### Q. 管理画面のログインでエラーが出る
+
+**A.**
+- `code.gs` の `ADMIN_API_TOKEN` と入力したトークンが一致しているか確認
+- GASを再デプロイしてから試す
 
 ### Q. 東京・埼玉の枠が意図せず × になる
 
