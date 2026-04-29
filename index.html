@@ -9,7 +9,7 @@
 </head>
 <body>
 
-  <!-- ===== ヘッダー（常に表示） ===== -->
+  <!-- ===== ヘッダー ===== -->
   <header class="header">
     <div class="header-inner">
       <div class="header-logo">🌿</div>
@@ -20,8 +20,47 @@
     </div>
   </header>
 
+  <!-- ===== LINE案内 ===== -->
+  <div class="line-prompt">
+    <p class="line-prompt__text">
+      ご予約前に、<strong>LINE公式アカウントの友だち追加</strong>をお願いいたします。<br>
+      予約後のご案内や日程調整はLINEにてご連絡する場合がございます。
+    </p>
+    <a id="lineAddBtn" class="btn-line" href="#" target="_blank" rel="noopener noreferrer">
+      <span class="btn-line__icon">💬</span>LINE友だち追加
+    </a>
+  </div>
+
+  <!-- ===== 注意書き ===== -->
+  <div class="notice-box">
+    <p class="notice-box__item">
+      📌 見学予約は現場調整のため、<strong>原則1週間前まで</strong>にお願いいたします。
+    </p>
+    <p class="notice-box__item notice-box__item--sub">
+      万が一、現場の都合や予約状況により日程・時間の調整をお願いする場合がございます。あらかじめご了承ください。
+    </p>
+  </div>
+
   <!-- ===== カレンダービュー ===== -->
   <div id="calendarView">
+
+    <!-- エリア選択 -->
+    <div class="area-selector-wrap">
+      <label class="area-selector__label" for="areaSelect">
+        <span class="area-selector__icon">📍</span>見学希望エリアを選択してください
+      </label>
+      <select class="area-selector__select" id="areaSelect">
+        <option value="">── エリアを選んで空き枠を確認 ──</option>
+        <option value="東京">東京（現地見学・3時間）</option>
+        <option value="埼玉">埼玉（現地見学・3時間）</option>
+        <option value="新潟">新潟（Zoom・1時間）</option>
+        <option value="愛知">愛知（Zoom・1時間）</option>
+        <option value="福岡">福岡（Zoom・1時間）</option>
+        <option value="岩手">岩手（Zoom・1時間）</option>
+        <option value="沖縄">沖縄（Zoom・1時間）</option>
+      </select>
+      <p class="area-selector__hint" id="areaHint">エリアを選ぶと、予約可能な枠が表示されます</p>
+    </div>
 
     <!-- 週ナビゲーション -->
     <div class="week-nav">
@@ -37,22 +76,22 @@
     <div class="legend">
       <span class="legend-item"><span class="legend-o">〇</span> 空きあり</span>
       <span class="legend-item"><span class="legend-tri">△</span> 残り1枠</span>
-      <span class="legend-item"><span class="legend-x">×</span> 満席／終了</span>
+      <span class="legend-item"><span class="legend-x">×</span> 満席／締切</span>
     </div>
 
     <!-- ローディング -->
     <div id="calendarLoading" class="calendar-state">
       <div class="spinner"></div>
-      <p>予約表を読み込み中...</p>
+      <p>予約表を読み込んでいます...</p>
     </div>
 
     <!-- エラー -->
     <div id="calendarError" class="calendar-state" style="display:none">
-      <p class="calendar-error-msg">予約表を読み込めませんでした</p>
+      <p class="calendar-error-msg">予約表を読み込めませんでした。<br>再読み込みしてください。</p>
       <button class="btn-retry" id="retryBtn">再読み込み</button>
     </div>
 
-    <!-- テーブルラッパー（横スクロール） -->
+    <!-- テーブル -->
     <div class="table-scroll-area" id="tableScrollArea" style="display:none">
       <div class="table-wrapper">
         <table class="calendar-table" id="calendarTable"></table>
@@ -64,10 +103,9 @@
   <!-- ===== フォームビュー ===== -->
   <div id="formView" style="display:none">
 
-    <!-- 戻るバー -->
     <div class="form-back-bar">
       <button class="btn-back" id="backBtn">
-        <span>&#8592;</span> 予約表に戻る
+        <span aria-hidden="true">&#8592;</span> 予約表に戻る
       </button>
     </div>
 
@@ -77,42 +115,124 @@
       <div class="selected-slot__text">
         <p class="selected-slot__date" id="selectedDateDisplay"></p>
         <p class="selected-slot__time" id="selectedTimeDisplay"></p>
+        <p class="selected-slot__area" id="selectedAreaDisplay"></p>
       </div>
     </div>
 
     <!-- 予約フォーム -->
     <form id="reservationForm" class="form-body" novalidate>
-      <input type="hidden" id="date" name="date">
-      <input type="hidden" id="selectedTime" name="time">
+      <input type="hidden" id="hiddenDate" name="date">
+      <input type="hidden" id="hiddenTime" name="time">
 
-      <!-- 学生情報 -->
+      <!-- 代表者情報 -->
       <section class="form-card">
-        <h2 class="card-title"><span class="card-icon">👤</span>学生情報</h2>
+        <h2 class="card-title"><span class="card-icon">👤</span>代表者情報</h2>
 
         <div class="form-group">
-          <label class="form-label" for="studentName">学生氏名 <span class="required-badge">必須</span></label>
-          <input class="form-input" type="text" id="studentName" placeholder="例：田中 太郎" autocomplete="off">
-          <p class="error-msg" id="studentNameError" role="alert"></p>
+          <label class="form-label" for="representativeName">代表者氏名 <span class="required-badge">必須</span></label>
+          <input class="form-input" type="text" id="representativeName" placeholder="例：田中 太郎" autocomplete="name">
+          <p class="error-msg" id="representativeNameError" role="alert"></p>
         </div>
+
+        <div class="form-group">
+          <label class="form-label" for="birthDate">生年月日 <span class="required-badge">必須</span></label>
+          <input class="form-input" type="date" id="birthDate" autocomplete="bday">
+          <p class="error-msg" id="birthDateError" role="alert"></p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="phone">電話番号 <span class="required-badge">必須</span></label>
+          <input class="form-input" type="tel" id="phone" placeholder="例：090-1234-5678" autocomplete="tel">
+          <p class="error-msg" id="phoneError" role="alert"></p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="email">メールアドレス <span class="required-badge">必須</span></label>
+          <input class="form-input" type="email" id="email" placeholder="例：example@email.com" autocomplete="email">
+          <p class="error-msg" id="emailError" role="alert"></p>
+        </div>
+      </section>
+
+      <!-- 学校情報 -->
+      <section class="form-card">
+        <h2 class="card-title"><span class="card-icon">🎓</span>学校情報</h2>
 
         <div class="form-group">
           <label class="form-label" for="schoolName">学校名 <span class="required-badge">必須</span></label>
-          <input class="form-input" type="text" id="schoolName" placeholder="例：○○大学 ○○学部" autocomplete="off">
+          <input class="form-input" type="text" id="schoolName" placeholder="例：○○大学 ○○学部" autocomplete="organization">
           <p class="error-msg" id="schoolNameError" role="alert"></p>
         </div>
 
-      </section>
-
-      <!-- 担当者情報 -->
-      <section class="form-card">
-        <h2 class="card-title"><span class="card-icon">📋</span>担当者情報</h2>
-
         <div class="form-group">
-          <label class="form-label" for="staffName">担当者名 <span class="required-badge">必須</span></label>
-          <input class="form-input" type="text" id="staffName" placeholder="例：山田 花子" autocomplete="off">
-          <p class="error-msg" id="staffNameError" role="alert"></p>
+          <label class="form-label" for="grade">学年 <span class="required-badge">必須</span></label>
+          <select class="form-select" id="grade">
+            <option value="">選択してください</option>
+            <option value="1年生">1年生</option>
+            <option value="2年生">2年生</option>
+            <option value="3年生">3年生</option>
+            <option value="4年生">4年生</option>
+            <option value="院生1年">院生1年</option>
+            <option value="院生2年">院生2年</option>
+            <option value="その他">その他</option>
+          </select>
+          <p class="error-msg" id="gradeError" role="alert"></p>
         </div>
 
+        <div class="form-group">
+          <label class="form-label" for="department">学科 <span class="required-badge">必須</span></label>
+          <input class="form-input" type="text" id="department" placeholder="例：福祉学科">
+          <p class="error-msg" id="departmentError" role="alert"></p>
+        </div>
+      </section>
+
+      <!-- 見学エリア -->
+      <section class="form-card">
+        <h2 class="card-title"><span class="card-icon">📍</span>見学エリア</h2>
+        <div class="form-group">
+          <label class="form-label" for="area">見学希望エリア <span class="required-badge">必須</span></label>
+          <select class="form-select" id="area">
+            <option value="">選択してください</option>
+            <option value="東京">東京（現地見学・3時間）</option>
+            <option value="埼玉">埼玉（現地見学・3時間）</option>
+            <option value="新潟">新潟（Zoom・1時間）</option>
+            <option value="愛知">愛知（Zoom・1時間）</option>
+            <option value="福岡">福岡（Zoom・1時間）</option>
+            <option value="岩手">岩手（Zoom・1時間）</option>
+            <option value="沖縄">沖縄（Zoom・1時間）</option>
+          </select>
+          <p class="error-msg" id="areaError" role="alert"></p>
+        </div>
+      </section>
+
+      <!-- 参加者情報 -->
+      <section class="form-card">
+        <h2 class="card-title"><span class="card-icon">👥</span>参加者情報</h2>
+        <p class="card-note">最大3名まで参加できます。代表者氏名と参加者1の氏名が同じでも構いません。</p>
+
+        <div class="form-group">
+          <label class="form-label" for="participant1">参加者1氏名 <span class="required-badge">必須</span></label>
+          <input class="form-input" type="text" id="participant1" placeholder="例：田中 太郎">
+          <p class="error-msg" id="participant1Error" role="alert"></p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="participant2">参加者2氏名 <span class="optional-badge">任意</span></label>
+          <input class="form-input" type="text" id="participant2" placeholder="例：鈴木 花子">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="participant3">参加者3氏名 <span class="optional-badge">任意</span></label>
+          <input class="form-input" type="text" id="participant3" placeholder="例：佐藤 次郎">
+        </div>
+
+        <div class="participant-count-box">
+          参加予定人数：<strong id="participantCountDisplay">0</strong>名
+        </div>
+      </section>
+
+      <!-- メモ -->
+      <section class="form-card">
+        <h2 class="card-title"><span class="card-icon">📝</span>メモ</h2>
         <div class="form-group">
           <label class="form-label" for="memo">メモ <span class="optional-badge">任意</span></label>
           <textarea class="form-textarea" id="memo" placeholder="特記事項があれば入力してください" rows="3"></textarea>
@@ -121,7 +241,7 @@
 
       <div class="form-footer">
         <button type="submit" class="btn-submit" id="submitBtn">
-          <span class="btn-submit__icon">✅</span>
+          <span class="btn-submit__icon" aria-hidden="true">✅</span>
           予約を確定する
         </button>
       </div>
@@ -130,22 +250,22 @@
   </div><!-- /formView -->
 
   <!-- ===== 予約完了モーダル ===== -->
-  <div class="modal" id="successModal" role="dialog" aria-modal="true">
+  <div class="modal" id="successModal" role="dialog" aria-modal="true" aria-labelledby="successTitle">
     <div class="modal-overlay" onclick="closeSuccessModal()"></div>
     <div class="modal-box modal-box--success">
       <div class="modal-icon modal-icon--success">✓</div>
-      <h2 class="modal-title">予約が完了しました</h2>
+      <h2 class="modal-title" id="successTitle">予約が完了しました</h2>
       <div class="modal-details" id="successDetails"></div>
       <button class="btn-modal btn-modal--success" onclick="closeSuccessModal()">予約表に戻る</button>
     </div>
   </div>
 
   <!-- ===== エラーモーダル ===== -->
-  <div class="modal" id="errorModal" role="dialog" aria-modal="true">
+  <div class="modal" id="errorModal" role="dialog" aria-modal="true" aria-labelledby="errorTitle">
     <div class="modal-overlay" onclick="closeErrorModal()"></div>
     <div class="modal-box modal-box--error">
       <div class="modal-icon modal-icon--error">!</div>
-      <h2 class="modal-title">予約できませんでした</h2>
+      <h2 class="modal-title" id="errorTitle">予約できませんでした</h2>
       <p class="modal-message" id="errorMessage"></p>
       <button class="btn-modal btn-modal--error" onclick="closeErrorModal()">戻る</button>
     </div>
